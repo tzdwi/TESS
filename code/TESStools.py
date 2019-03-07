@@ -9,6 +9,7 @@ import warnings
 import celerite
 from celerite import terms
 from scipy.optimize import minimize
+from scipy.optimize import curve_fit
 import emcee
 
 data = 'massive_2min.csv'
@@ -178,3 +179,146 @@ def dSHO_emcee(lc, gp, nwalkers = 32, burnin = 500, production = 3000):
     sampler.run_mcmc(p0, production)
     
     return sampler, gp
+
+def parametrized_sin(t, freq, amp, phase):
+    "A sin function, used for prewhitening"
+    return amp * np.sin(2.0*np.pi*freq*t + phase)
+
+def prewhiten(time, flux, err, verbose = True):
+    """
+    Runs through a prewhitening procedure to reproduce the variability as sin functions
+    
+    
+    Parameters
+    ----------
+    time : array-like
+        times
+    flux : array-like
+        fluxes
+    err : array-like
+        corresponding errors.
+    verbose : bool
+        If set, will print out every 10th stage of prewhitening, as well as some other diagnostics
+        
+    Returns
+    -------
+    good_fs : `~numpy.ndarray`
+        Nx2 array with first dimension frequencies, and the second errors
+    good_amps :`~numpy.ndarray`
+        Nx2 array with first dimension amplitudes, and the second errors
+        
+    good_amps :`~numpy.ndarray`
+        Nx2 array with first dimension amplitudes, and the second errors
+    
+    """
+    
+    pseudo_NF = 0.5 / (np.mean(np.diff(time)))
+    rayleigh = 1.0 / (np.max(time)-np.min(time))
+    if verbose:
+        print('f_Ny = {0}, f_R = {1}'.format(pseudo_NF,rayleigh))
+    
+    #Step 1: subtract off the mean, save original arrays for later
+    flux -= np.mean(flux)
+    
+    original_flux = flux.copy()
+    original_err = err.copy()
+    
+    found_fs = []
+    err_fs = []
+    found_amps = []
+    err_amps = []
+    found_phases = []
+    err_phases = []
+    
+    #Step 2: Calculate the Lomb Scargle periodogram
+    ls = LombScargle(time, flux, normalization='psd')
+    frequency, power = ls.autopower(minimum_frequency=1.0/30.0,
+                    maximum_frequency=pseudo_NF)
+
+    #Step 3: Find frequency of max power
+    f_0 = frequency[np.argmax(power)]
+
+    #Step 4: Fit the sin. Initial guess is that frequency, the max flux point, and no phase
+    # Then save the fit params
+    p0 = [f_0, np.max(flux), 0]
+    bounds = ([f_0-rayleigh,0,-np.inf],[f_0+rayleigh,np.inf,np.inf])
+
+    popt, pcov = curve_fit(parametrized_sin, time, flux, bounds=bounds, p0=p0)
+
+    found_fs.append(popt[0])
+    found_amps.append(popt[1])
+    found_phases.append(popt[2])
+    
+    #Calculate the errors
+    err_fs.append(np.sqrt(6.0/len(time)) * rayleigh * np.std(flux) / (np.pi * popt[1]))
+    err_amps.append(np.sqrt(2.0/len(time)) * np.std(flux))
+    err_phases.append(np.sqrt(2.0/len(time)) * np.std(flux) / popt[1])
+    
+    #Calculate the BIC up to a constant: -2 log L + m log (N)
+    log_like_ish = np.sum(np.power(((original_flux - np.sum([parametrized_sin(time, f, amp, phase)
+                                    for f, amp, phase in zip(found_fs, found_amps, found_phases)],
+                                    axis=0)) / original_err),2.0))
+    
+    bic = log_like_ish + 3.0*len(found_fs)*np.log(len(time))
+    
+    #subtract off the fit
+    flux -= parametrized_sin(time, *popt)
+    
+    #now loop until BIC hits a minimum
+    bic_dif = -1
+    j = 0
+    while bic_dif <= 0:
+        #Reset old_bic
+        old_bic = bic
+        #Lomb Scargle
+        ls = LombScargle(time, flux, normalization='psd')
+        frequency, power = ls.autopower(minimum_frequency=1.0/30.0,
+                        maximum_frequency=pseudo_NF)
+        #Highest peak
+        f_0 = frequency[np.argmax(power)]
+        #Fit
+        p0 = [f_0, np.max(flux), 0]
+        bounds = ([f_0-rayleigh,0,-np.inf],[f_0+rayleigh,np.inf,np.inf])
+        popt, pcov = curve_fit(parametrized_sin, time, flux, bounds=bounds, p0=p0)
+        found_fs.append(popt[0])
+        found_amps.append(popt[1])
+        found_phases.append(popt[2])
+        #Calculate the errors
+        err_fs.append(np.sqrt(6.0/len(time)) * rayleigh * np.std(flux) / (np.pi * popt[1]))
+        err_amps.append(np.sqrt(2.0/len(time)) * np.std(flux))
+        err_phases.append(np.sqrt(2.0/len(time)) * np.std(flux) / popt[1])
+        #Calculate BIC 
+        log_like_ish = np.sum(np.power(((original_flux - np.sum([parametrized_sin(time, f, amp, 
+                                        phase) for f, amp, phase in zip(found_fs, found_amps, 
+                                        found_phases)], axis=0)) / original_err),2.0))
+        bic = log_like_ish + 3.0*len(found_fs)*np.log(len(time))
+        bic_dif = bic - old_bic
+        #subtract off the fit
+        flux -= parametrized_sin(time, *popt)
+        j+=1
+        if (j % 10 == 0) and verbose:
+            print(j)
+    if verbose:
+        print('Found {} frequencies'.format(len(found_fs)-1))
+    #pop the last from each array, as it made the fit worse, then turn into numpy arrays
+    found_fs = np.array(found_fs[:-1])
+    found_amps = np.array(found_amps[:-1])
+    found_phases = np.array(found_phases[:-1])
+    err_fs = np.array(err_fs[:-1])
+    err_amps = np.array(err_amps[:-1])
+    err_phases = np.array(err_phases[:-1])
+    
+    #Now loop through frequencies. If any of the less-strong peaks are within 1.5/T,
+    #get rid of it.
+    good_fs = np.array([[found_fs[0],err_fs[0]]])
+    good_amps = np.array([[found_amps[0],err_amps[0]]])
+    good_phases = np.array([[found_phases[0],err_phases[0]]])
+    for f,ef,a,ea,p,ep in zip(found_fs[1:],err_fs[1:],found_amps[1:],err_amps[1:],found_phases[1:],err_phases[1:]):
+        if ~np.any(np.abs(good_fs[:,0] - f) <= 1.5*rayleigh):
+            good_fs = np.append(good_fs,[[f,ef]],axis=0)
+            good_amps = np.append(good_fs,[[a,ea]],axis=0)
+            good_phases = np.append(good_fs,[[p,ep]],axis=0)
+    if verbose:
+        print('{} unique frequencies'.format(len(good_fs)))
+    
+    return good_fs, good_amps, good_phases
