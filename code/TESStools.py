@@ -316,9 +316,90 @@ def prewhiten(time, flux, err, verbose = True):
     for f,ef,a,ea,p,ep in zip(found_fs[1:],err_fs[1:],found_amps[1:],err_amps[1:],found_phases[1:],err_phases[1:]):
         if ~np.any(np.abs(good_fs[:,0] - f) <= 1.5*rayleigh):
             good_fs = np.append(good_fs,[[f,ef]],axis=0)
-            good_amps = np.append(good_fs,[[a,ea]],axis=0)
-            good_phases = np.append(good_fs,[[p,ep]],axis=0)
+            good_amps = np.append(good_amps,[[a,ea]],axis=0)
+            good_phases = np.append(good_phases,[[p,ep]],axis=0)
     if verbose:
         print('{} unique frequencies'.format(len(good_fs)))
     
     return good_fs, good_amps, good_phases
+
+def harmonic_search(fs, max_n = 10):
+    """
+    Search for harmonics from a list of frequencies and associated errors
+    
+    Parameters
+    ----------
+    fs : Nx2 array like
+        fs[:,0] should contain the frequencies, with associated errors in fs[:,1]
+        
+    max_n : int
+        maximum harmonic number to search for.
+        
+    Returns
+    -------
+    fundamentals : array like
+        value of fundamental frequencies
+    harmonics : array like
+        value of harmonic frequencies found
+    ns : array like
+        which order harmonic we've found
+    
+    """
+    fundamentals = []
+    harmonics = []
+    ns = []
+    
+    for f,e in fs:
+        for i in range(2,max_n+1):
+            expected_freq = i*f
+            expected_error = i*e
+            for fo,eo in fs:
+                total_error = np.sqrt(eo**2.0 + expected_error**2.0)
+                if np.abs(expected_freq - fo) <= total_error:
+                    fundamentals.append(f)
+                    harmonics.append(fo)
+                    ns.append(i)
+    return np.array([fundamentals, harmonics, ns])
+
+def combo_search(fs):
+    """
+    Search for combinations from a list of frequencies and associated errors
+    
+    Parameters
+    ----------
+    fs : Nx2 array like
+        fs[:,0] should contain the frequencies, with associated errors in fs[:,1]
+        
+    Returns
+    -------
+    f0s : array like
+        value of first frequencies
+    f1s : array like
+        value of second frequencies
+    f2s : array like
+        value of frequency closest to sum
+    
+    """
+    
+    f0s = []
+    f1s = []
+    f2s = []
+    
+    for i in range(len(fs)-1):
+        
+        f, fe = fs[i]
+        
+        for k in range(i+1,len(good_fs)):
+            
+            f1, f1e = fs[k]
+            fsum = f+f1
+            
+            absdifs = np.abs(fsum - fs[:,0])
+            diferrs = np.sqrt(fe**2.0 + f1e**2.0 + fs[:,1]**2.0)
+            if np.any(absdifs <= diferrs):
+                
+                f0s.append(f)
+                f1s.append(f1)
+                f2s.append(good_fs[:,0][absdifs <= diferrs][0])
+                
+    return np.array([f0s,f1s,f2s])
