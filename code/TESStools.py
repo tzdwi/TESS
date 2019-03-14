@@ -389,7 +389,7 @@ def combo_search(fs):
         
         f, fe = fs[i]
         
-        for k in range(i+1,len(good_fs)):
+        for k in range(i+1,len(fs)):
             
             f1, f1e = fs[k]
             fsum = f+f1
@@ -400,6 +400,6 @@ def combo_search(fs):
                 
                 f0s.append(f)
                 f1s.append(f1)
-                f2s.append(good_fs[:,0][absdifs <= diferrs][0])
+                f2s.append(fs[:,0][absdifs <= diferrs][0])
                 
     return np.array([f0s,f1s,f2s])
