@@ -1,7 +1,6 @@
-paper
+paper*
+*.tex
 data
-paper_Jan2019
-paper_Jan2019.zip
 */.ipynb_checkpoints/
 .ipynb_checkpoints/
 
