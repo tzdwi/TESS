@@ -1,15 +1,15 @@
 \begin{deluxetable*}{cccccc}
 \tabletypesize{\footnotesize}
-\tablecaption{Unique frequencies, amplitudes, phases, and formal errors for HD 270111 found via prewhitening.\label{tab:HD 270111_freqs}}
+\tablecaption{Unique frequencies, amplitudes, phases, and formal errors for HD 270111 found via prewhitening, as well as the signal to noise ratio, defined in text.\label{tab:HD 270111_freqs}}
 \tablehead{\colhead{$f_j$} & \colhead{$\epsilon(f_j)$} & \colhead{$A_j$} & \colhead{$\epsilon(A_j)$} & \colhead{$\phi_j$} &  \colhead{$\epsilon(\phi_j)$} \\
-\colhead{[day$^{-1}$]} & \colhead{[day$^{-1}$]} & \colhead{[Normalized counts]} & \colhead{[Normalized counts]} & \colhead{[radians]} & \colhead{[radians]}} 
+\colhead{[day$^{-1}$]} & \colhead{[day$^{-1}$]} & \colhead{[ppt]} & \colhead{[ppt]} & \colhead{[radians]} & \colhead{[radians]}  } 
 \startdata
-$0.13690821$ & $0.00134854$ & $0.00013655$ & $0.000009$ & $-28.82$ & $0.0682$ \\ 
-$0.20720738$ & $0.00228811$ & $0.00008002$ & $0.000009$ & $-15.48$ & $0.1157$ \\ 
-$0.48123388$ & $0.00267880$ & $0.00006820$ & $0.000009$ & $-27.61$ & $0.1355$ \\ 
-$0.28689396$ & $0.00253835$ & $0.00007187$ & $0.000009$ & $-19.86$ & $0.1284$ \\ 
-$0.41136823$ & $0.00327074$ & $0.00005562$ & $0.000009$ & $19.52$ & $0.1654$ \\ 
-$1.10220750$ & $0.00358087$ & $0.00005075$ & $0.000009$ & $2.276$ & $0.1811$ \\ 
+$0.13690821$ & $0.00134854$ & $0.13655040$ & $0.009312$ & $2.599$ & $0.0682$ \\ 
+$0.20720738$ & $0.00228811$ & $0.08001971$ & $0.009259$ & $-2.909$ & $0.1157$ \\ 
+$0.48123388$ & $0.00267880$ & $0.06819859$ & $0.009239$ & $-2.478$ & $0.1355$ \\ 
+$0.28689396$ & $0.00253835$ & $0.07186560$ & $0.009225$ & $-1.008$ & $0.1284$ \\ 
+$0.41136823$ & $0.00327074$ & $0.05561540$ & $0.009199$ & $0.6688$ & $0.1654$ \\ 
+$1.10220750$ & $0.00358087$ & $0.05074735$ & $0.009190$ & $2.276$ & $0.1811$ \\ 
 
 \enddata
 \end{deluxetable*}

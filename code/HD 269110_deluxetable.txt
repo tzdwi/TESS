@@ -1,16 +1,16 @@
 \begin{deluxetable*}{cccccc}
 \tabletypesize{\footnotesize}
-\tablecaption{Unique frequencies, amplitudes, phases, and formal errors for HD 269110 found via prewhitening.\label{tab:HD 269110_freqs}}
+\tablecaption{Unique frequencies, amplitudes, phases, and formal errors for HD 269110 found via prewhitening, as well as the signal to noise ratio, defined in text.\label{tab:HD 269110_freqs}}
 \tablehead{\colhead{$f_j$} & \colhead{$\epsilon(f_j)$} & \colhead{$A_j$} & \colhead{$\epsilon(A_j)$} & \colhead{$\phi_j$} &  \colhead{$\epsilon(\phi_j)$} \\
-\colhead{[day$^{-1}$]} & \colhead{[day$^{-1}$]} & \colhead{[Normalized counts]} & \colhead{[Normalized counts]} & \colhead{[radians]} & \colhead{[radians]}} 
+\colhead{[day$^{-1}$]} & \colhead{[day$^{-1}$]} & \colhead{[ppt]} & \colhead{[ppt]} & \colhead{[radians]} & \colhead{[radians]}  } 
 \startdata
-$0.55347685$ & $0.00054988$ & $0.00015766$ & $0.000009$ & $9.479$ & $0.05607$ \\ 
-$0.11644097$ & $0.00063650$ & $0.00013561$ & $0.000009$ & $-12.54$ & $0.0649$ \\ 
-$0.15753531$ & $0.00084280$ & $0.00010208$ & $0.000009$ & $3.502$ & $0.08594$ \\ 
-$0.06899622$ & $0.00092764$ & $0.00009256$ & $0.000009$ & $0.3983$ & $0.09459$ \\ 
-$0.19233848$ & $0.00121647$ & $0.00007032$ & $0.000009$ & $9.879$ & $0.124$ \\ 
-$0.03827322$ & $0.00123650$ & $0.00006912$ & $0.000009$ & $-14.62$ & $0.1261$ \\ 
-$0.40617680$ & $0.00160856$ & $0.00005304$ & $0.000009$ & $5.473$ & $0.164$ \\ 
+$0.55347685$ & $0.00054988$ & $0.15765766$ & $0.008840$ & $-3.087$ & $0.05607$ \\ 
+$0.11644097$ & $0.00063650$ & $0.13560965$ & $0.008801$ & $0.02468$ & $0.0649$ \\ 
+$0.15753531$ & $0.00084280$ & $0.10207525$ & $0.008772$ & $-2.781$ & $0.08594$ \\ 
+$0.06899622$ & $0.00092764$ & $0.09256332$ & $0.008756$ & $0.3983$ & $0.09459$ \\ 
+$0.19233848$ & $0.00121647$ & $0.07031901$ & $0.008722$ & $-2.687$ & $0.124$ \\ 
+$0.03827322$ & $0.00123650$ & $0.06911817$ & $0.008715$ & $-2.057$ & $0.1261$ \\ 
+$0.40617680$ & $0.00160856$ & $0.05304164$ & $0.008700$ & $-0.8097$ & $0.164$ \\ 
 
 \enddata
 \end{deluxetable*}

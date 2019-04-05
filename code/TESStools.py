@@ -229,6 +229,7 @@ def prewhiten(time, flux, err, verbose = True):
     err_amps = []
     found_phases = []
     err_phases = []
+    found_snrs = []
     
     #Step 2: Calculate the Lomb Scargle periodogram
     ls = LombScargle(time, flux, normalization='psd')
@@ -247,7 +248,12 @@ def prewhiten(time, flux, err, verbose = True):
 
     found_fs.append(popt[0])
     found_amps.append(popt[1])
-    found_phases.append(popt[2])
+    phase = popt[2]
+    while phase >= np.pi:
+        phase -= 2.0*np.pi
+    while phase <= -np.pi:
+        phase += 2.0*np.pi
+    found_phases.append(phase)
     
     #Calculate the errors
     err_fs.append(np.sqrt(6.0/len(time)) * rayleigh * np.std(flux) / (np.pi * popt[1]))
@@ -260,12 +266,14 @@ def prewhiten(time, flux, err, verbose = True):
                                     axis=0)) / original_err),2.0))
     
     bic = log_like_ish + 3.0*len(found_fs)*np.log(len(time))
+    #bic with no fit is:
+    old_bic = np.sum(np.power((original_flux/ original_err),2.0))
+    bic_dif = bic - old_bic
     
     #subtract off the fit
     flux -= parametrized_sin(time, *popt)
     
     #now loop until BIC hits a minimum
-    bic_dif = -1
     j = 0
     while bic_dif <= 0:
         #Reset old_bic
@@ -276,17 +284,26 @@ def prewhiten(time, flux, err, verbose = True):
                         maximum_frequency=pseudo_NF)
         #Highest peak
         f_0 = frequency[np.argmax(power)]
+        
         #Fit
         p0 = [f_0, np.max(flux), 0]
         bounds = ([f_0-rayleigh,0,-np.inf],[f_0+rayleigh,np.inf,np.inf])
         popt, pcov = curve_fit(parametrized_sin, time, flux, bounds=bounds, p0=p0)
+        
         found_fs.append(popt[0])
         found_amps.append(popt[1])
-        found_phases.append(popt[2])
+        phase = popt[2]
+        while phase >= np.pi:
+            phase -= 2.0*np.pi
+        while phase <= -np.pi:
+            phase += 2.0*np.pi
+        found_phases.append(phase)
+        
         #Calculate the errors
         err_fs.append(np.sqrt(6.0/len(time)) * rayleigh * np.std(flux) / (np.pi * popt[1]))
-        err_amps.append(np.sqrt(2.0/len(time)) * np.std(flux))
+        err_amps.append(np.sqrt(2.0/len(time)) * np.std(flux))      
         err_phases.append(np.sqrt(2.0/len(time)) * np.std(flux) / popt[1])
+        
         #Calculate BIC 
         log_like_ish = np.sum(np.power(((original_flux - np.sum([parametrized_sin(time, f, amp, 
                                         phase) for f, amp, phase in zip(found_fs, found_amps, 
@@ -308,20 +325,27 @@ def prewhiten(time, flux, err, verbose = True):
     err_amps = np.array(err_amps[:-1])
     err_phases = np.array(err_phases[:-1])
     
+    #now add back the last sin function to arrive at "just the noise", and calculate SNR
+    flux += parametrized_sin(time, *popt)
+    found_snrs = found_amps/np.std(flux)
+    
     #Now loop through frequencies. If any of the less-strong peaks are within 1.5/T,
     #get rid of it.
     good_fs = np.array([[found_fs[0],err_fs[0]]])
     good_amps = np.array([[found_amps[0],err_amps[0]]])
     good_phases = np.array([[found_phases[0],err_phases[0]]])
-    for f,ef,a,ea,p,ep in zip(found_fs[1:],err_fs[1:],found_amps[1:],err_amps[1:],found_phases[1:],err_phases[1:]):
+    good_snrs = np.array([found_snrs[0]])
+    
+    for f,ef,a,ea,p,ep,s in zip(found_fs[1:],err_fs[1:],found_amps[1:],err_amps[1:],found_phases[1:],err_phases[1:],found_snrs[1:]):
         if ~np.any(np.abs(good_fs[:,0] - f) <= 1.5*rayleigh):
             good_fs = np.append(good_fs,[[f,ef]],axis=0)
             good_amps = np.append(good_amps,[[a,ea]],axis=0)
             good_phases = np.append(good_phases,[[p,ep]],axis=0)
+            good_snrs = np.append(good_snrs,[s],axis=0)
     if verbose:
         print('{} unique frequencies'.format(len(good_fs)))
     
-    return good_fs, good_amps, good_phases
+    return good_fs, good_amps, good_phases #, good_snrs
 
 def harmonic_search(fs, max_n = 10):
     """
