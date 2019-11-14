@@ -12,9 +12,7 @@ from scipy.optimize import minimize
 from scipy.optimize import curve_fit
 import emcee
 
-data = 'massive_2min.csv'
 data_dir = '../data/massive_lcs/'
-massive = pd.read_csv(data)
 
 def get_lc_from_id(ticid, normalize=True, clean=True):
     
@@ -80,12 +78,12 @@ def peak_finder(f,p,n,FAL=0,width=20):
     strengths = np.array(strengths)[isort]
     return peaks[::-1][:n],strengths[::-1][:n]
 
-def lc_extract(lc, smooth=None):
+def lc_extract(lc, normalize=True, smooth=None):
     """Extract and clean flux from lightcurve df. Optionally also 
     smooth the lightcurve on a rolling median, specified by smooth. Returns both"""
     
     rtime = lc['TIME'].values
-    if 'NormPDCSAP_FLUX' in lc.columns:
+    if normalize and ('NormPDCSAP_FLUX' in lc.columns):
         rflux = lc['NormPDCSAP_FLUX'].values
         rerr = lc['NormPDCSAP_FLUX_ERR'].values
     else:
