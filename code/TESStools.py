@@ -745,7 +745,7 @@ def WWZ(func_list,f1,y,t,omega,tau,c=0.0125,exclude=True):
     
     """
     
-    if np.min(np.abs(t-tau)) > 2.0*np.pi/omega:
+    if exclude and (np.min(np.abs(t-tau)) > 2.0*np.pi/omega):
         return 0.0, 0.0
     
     ws = w_alpha(t,omega,tau,c)
