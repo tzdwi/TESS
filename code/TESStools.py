@@ -2,8 +2,9 @@ import numpy as np
 import pandas as pd
 from astropy.table import Table, vstack
 from matplotlib import pyplot as plt
+from matplotlib.gridspec import GridSpec
 from glob import glob
-from astropy.stats import LombScargle
+from astropy.timeseries import LombScargle
 from scipy import stats
 import warnings
 import celerite
@@ -823,3 +824,81 @@ def MP_WWZ(func_list,f1,y,t,omegas,taus,
         wwa = transform[:,:,1].T
     
     return wwz,wwa
+
+
+def make_WWZ_plot(wwz,wwa,omegas,taus,t,y,lombscargle=True,**kwargs):
+    """
+    Makes a pretty plot with the WWZ info
+    
+    Parameters
+    ----------
+    wwz : array-like
+        `(len(omegas),len(taus))` Weighted Wavelet Z-transform array
+    wwa : array-like
+        `(len(omegas),len(taus))` Weighted Wavelet Amplitude array
+    omegas : array-like
+        1-D array of angular frequencies
+    taus : array-like
+        1-D array of time-shifts
+    t : array-like
+        1-D array of time observations
+    y : array-like
+        1-D array of flux or magnitude observations
+    lombscargle : bool
+        Whether or not to plot the Lomb-Scargle periodogram to compare with the WWZ spectrum. 
+        Default True.
+    **kwargs
+        Passed to `matplotlib.pyplot.figure()`
+        
+    Returns
+    -------
+    fig : `matplotlib.pyplot.Figure`
+        Figure object
+    ax : list
+        List of `matplotlib.pyplot.Axes` objects
+    
+    """
+    if lombscargle:
+        ls = LombScargle(t,y)
+        freq,power = ls.autopower()
+    
+    fig = plt.figure(constrained_layout=True,**kwargs)
+
+    gs = GridSpec(5, 4, figure=fig)
+    lcax = fig.add_subplot(gs[0, :3])
+    wwzax = fig.add_subplot(gs[1:3,:3])
+    wwaax = fig.add_subplot(gs[3:,:3])
+    zsumax = fig.add_subplot(gs[1:3,3])
+    asumax = fig.add_subplot(gs[3:,3])
+
+    lcax.scatter(time,flux,s=1,c='k')
+    lcax.set(ylabel='Normalized Flux',xlim=(np.min(time),np.max(time)))
+
+    wwzax.contourf(taus,omegas/2.0/np.pi,wwz,levels=100,cmap='cividis')
+    wwzax.fill_between(2*np.pi/omegas+np.min(t),0,omegas/2/np.pi,alpha=0.5,facecolor='white')
+    wwzax.fill_between(np.max(t)-2*np.pi/omegas,0,omegas/2/np.pi,alpha=0.5,facecolor='white')
+    wwzax.set(ylabel=r'Frequency [d$^{-1}$]',ylim=(np.min(omegas)/2/np.pi,np.max(omegas/2/np.pi)))
+
+    wwaax.contourf(taus,omegas/2.0/np.pi,wwa,levels=100,cmap='cividis')
+    wwaax.fill_between(2*np.pi/omegas+np.min(t),0,omegas/2/np.pi,alpha=0.5,facecolor='white')
+    wwaax.fill_between(np.max(t)-2*np.pi/omegas,0,omegas/2/np.pi,alpha=0.5,facecolor='white')
+    wwaax.set(xlabel='Time [d]',ylabel=r'Frequency [d$^{-1}$]',
+              ylim=(np.min(omegas)/2/np.pi,np.max(omegas/2/np.pi)))
+
+    zsumax.plot(np.mean(wwz,axis=1),omegas/2.0/np.pi)
+    if lombscargle:
+        scale = np.max(np.mean(wwz,axis=1))/np.max(power)
+        zsumax.plot(power*scale,freq,c='k')
+    zsumax.set(yticks=[],xlabel=r'$\langle WWZ \rangle$',
+               ylim=(np.min(omegas)/2/np.pi,np.max(omegas/2/np.pi)))
+
+    asumax.plot(np.mean(wwa,axis=1),omegas/2.0/np.pi)
+    asumax.set(yticks=[],xlabel=r'$\langle WWA \rangle$',
+               ylim=(np.min(omegas)/2/np.pi,np.max(omegas/2/np.pi)))
+    if lombscargle:
+        scale = np.max(np.mean(wwa,axis=1))/np.max(power)
+        asumax.plot(power*scale,freq,c='k')
+    
+    return fig, [lxax,wwzax,wwaax,zsumax,asumax]
+    
+    
