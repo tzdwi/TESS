@@ -1,6 +1,8 @@
 paper*
 *.tex
 data
+*.png
+*.pdf
 */.ipynb_checkpoints/
 .ipynb_checkpoints/
 

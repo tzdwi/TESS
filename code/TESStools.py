@@ -13,8 +13,14 @@ from scipy.optimize import minimize
 from scipy.optimize import curve_fit
 import emcee
 import multiprocessing
+from tqdm import tqdm
+from tqdm.notebook import tqdm as nb_tqdm
 
-data_dir = '../data/massive_lcs/'
+data_dir = '../data/all_massive_lcs/'
+
+def set_data_dir(datadir):
+    global data_dir
+    data_dir = datadir
 
 def get_lc_from_id(ticid, normalize=True, clean=True):
     
@@ -184,10 +190,88 @@ def parametrized_sin(t, freq, amp, phase):
     "A sin function, used for prewhitening"
     return amp * np.sin(2.0*np.pi*freq*t + phase)
 
-def prewhiten(time, flux, err, verbose = True):
+
+def noise_func(f, alpha_0, tau, gamma, alpha_w):
     """
-    Runs through a prewhitening procedure to reproduce the variability as sin functions
+    A phenomenological noise model with red noise + white noise to fit the amplitude spectrum of a light curve
     
+    Parameters
+    ----------
+    f : array-like
+        Frequencies to calculate the noise function on.
+    
+    alpha_0 : float
+        Amplitude of the red noise component, `noise_func` approaches `alpha_0 + alpha_w` for `f=0`
+        
+    tau : float
+        Characteristic timescale, inverse units of `f`
+        
+    gamma : float
+        Power-law slope of the noise
+        
+    alpha_2 : float
+        Amplitude of the white noise component
+        
+    Returns
+    -------
+    noise_func : array-like
+        Noise function evaluated on `f`.
+    
+    """
+    return alpha_0 / (1.0 + np.power((2.0*np.pi*tau*f),gamma)) + alpha_w
+
+def log_noise(f, alpha_0, tau, gamma, alpha_w):
+    """
+    Log10 of `noise_func`
+    
+    """
+    return np.log10(noise_func(f, alpha_0, tau, gamma, alpha_w))
+
+def fit_red_noise(f, p):
+    """
+    Fits a given the amplitude spectrum of a given PSD periodogram (frequency, power)
+    with a red noise model.
+    
+    Parameters
+    ----------
+    f : array-like
+        Frequencies
+    p : array-like
+        Power, in units of Hz^-1. You can get this by dividing the power from LombScargle(t, y, normalization='psd')
+        by the number of observations.
+        
+    Returns
+    -------
+    popt : array-like
+        Optimal parameters for the curve-fit
+    resid : array-like
+        The residual power after dividing out the red noise. This is kinda like a signal to noise I guess?
+    
+    """
+    
+    amplitude = np.sqrt(p)
+    
+    good_f = ~np.isnan(f)
+    good_a = ~np.isnan(np.log10(amplitude))
+    
+    good_x = f[good_f & good_a]
+    good_y = amplitude[good_a & good_f]
+        
+    p0 = [np.max(good_y), 0.1, 2.0, 1e-6]
+    bounds = bounds = ([0,0,-np.inf,1e-7],[np.inf,np.inf,np.inf,np.inf])
+        
+    popt, pcov = curve_fit(log_noise, good_x, np.log10(good_y), bounds=bounds, p0=p0)
+    
+    fit = np.power(noise_func(f,*popt),2.0)
+    
+    resid = p/fit
+    
+    return popt, pcov, resid
+
+def prewhiten(time, flux, err, verbose = True, red_noise=True, max_freq = np.inf):
+    """
+    Runs through a prewhitening procedure to reproduce the variability as sin functions. Now encorporates an optional
+    way of fitting for red noise in the periodograms!
     
     Parameters
     ----------
@@ -199,6 +283,10 @@ def prewhiten(time, flux, err, verbose = True):
         corresponding errors.
     verbose : bool
         If set, will print out every 10th stage of prewhitening, as well as some other diagnostics
+    red_noise : bool
+        If set, will fit for a red noise background model before finding the highest peak
+    max_freq : numeric
+        Determines the number of frequencies to fit for if given. Default `np.inf`
         
     Returns
     -------
@@ -206,38 +294,55 @@ def prewhiten(time, flux, err, verbose = True):
         Nx2 array with first dimension frequencies, and the second errors
     good_amps :`~numpy.ndarray`
         Nx2 array with first dimension amplitudes, and the second errors
-        
     good_amps :`~numpy.ndarray`
         Nx2 array with first dimension amplitudes, and the second errors
+    good_snrs :`~numpy.ndarray`
+        1D array with signal to noise, calculated directly from the periodogram
+    good_amps :`~numpy.ndarray`
+        1D array with the heights of the extracted peaks.
     
     """
     
     pseudo_NF = 0.5 / (np.mean(np.diff(time)))
     rayleigh = 1.0 / (np.max(time)-np.min(time))
-    if verbose:
-        print('f_Ny = {0}, f_R = {1}'.format(pseudo_NF,rayleigh))
-    
+
     #Step 1: subtract off the mean, save original arrays for later
     flux -= np.mean(flux)
-    
+    time -= np.mean(time)
+
     original_flux = flux.copy()
     original_err = err.copy()
-    
+    original_time = time.copy()
+
     found_fs = []
     err_fs = []
     found_amps = []
     err_amps = []
     found_phases = []
     err_phases = []
+    found_peaks = []
     found_snrs = []
-    
+
     #Step 2: Calculate the Lomb Scargle periodogram
     ls = LombScargle(time, flux, normalization='psd')
     frequency, power = ls.autopower(minimum_frequency=1.0/30.0,
                     maximum_frequency=pseudo_NF)
+    power /= len(time) #putting into the right units
 
-    #Step 3: Find frequency of max power
+    #Step 2.5: Normaling by the red noise!
+    if red_noise:
+        try:
+            popt, pcov, resid = fit_red_noise(frequency, power)
+        except RuntimeError:
+            popt, pcov, resid = fit_red_noise(frequency[frequency < 50], power[frequency < 50])
+
+        power = resid
+
+    #Step 3: Find frequency of max residual power, and the SNR of that peak
     f_0 = frequency[np.argmax(power)]
+    noise_region = (np.abs(frequency - f_0)/rayleigh < 7) & (np.abs(frequency - f_0)/rayleigh > 2)
+    found_peaks.append(power.max())
+    found_snrs.append(power.max()/np.std(power[noise_region]))
 
     #Step 4: Fit the sin. Initial guess is that frequency, the max flux point, and no phase
     # Then save the fit params
@@ -254,42 +359,57 @@ def prewhiten(time, flux, err, verbose = True):
     while phase <= -np.pi:
         phase += 2.0*np.pi
     found_phases.append(phase)
-    
+
     #Calculate the errors
     err_fs.append(np.sqrt(6.0/len(time)) * rayleigh * np.std(flux) / (np.pi * popt[1]))
     err_amps.append(np.sqrt(2.0/len(time)) * np.std(flux))
     err_phases.append(np.sqrt(2.0/len(time)) * np.std(flux) / popt[1])
-    
+
     #Calculate the BIC up to a constant: -2 log L + m log (N)
     log_like_ish = np.sum(np.power(((original_flux - np.sum([parametrized_sin(time, f, amp, phase)
                                     for f, amp, phase in zip(found_fs, found_amps, found_phases)],
                                     axis=0)) / original_err),2.0))
-    
+
     bic = log_like_ish + 3.0*len(found_fs)*np.log(len(time))
     #bic with no fit is:
     old_bic = np.sum(np.power((original_flux/ original_err),2.0))
     bic_dif = bic - old_bic
-    
+
     #subtract off the fit
     flux -= parametrized_sin(time, *popt)
-    
+
     #now loop until BIC hits a minimum
     j = 0
-    while bic_dif <= 0:
+    while (bic_dif <= 0) and (len(found_fs) <= max_freq):
         #Reset old_bic
         old_bic = bic
         #Lomb Scargle
         ls = LombScargle(time, flux, normalization='psd')
         frequency, power = ls.autopower(minimum_frequency=1.0/30.0,
                         maximum_frequency=pseudo_NF)
+
+        power /= len(time) #putting into the right units
+
+        #fit
+        if red_noise:
+            try:
+                popt, pcov, resid = fit_red_noise(frequency, power)
+            except RuntimeError:
+                popt, pcov, resid = fit_red_noise(frequency[frequency < 50], power[frequency < 50])
+
+            power = resid
+
         #Highest peak
         f_0 = frequency[np.argmax(power)]
-        
+        noise_region = (np.abs(frequency - f_0)/rayleigh < 7) & (np.abs(frequency - f_0)/rayleigh > 2)
+        found_peaks.append(power.max())
+        found_snrs.append(power.max()/np.std(power[noise_region]))
+
         #Fit
         p0 = [f_0, np.max(flux), 0]
         bounds = ([f_0-rayleigh,0,-np.inf],[f_0+rayleigh,np.inf,np.inf])
         popt, pcov = curve_fit(parametrized_sin, time, flux, bounds=bounds, p0=p0)
-        
+
         found_fs.append(popt[0])
         found_amps.append(popt[1])
         phase = popt[2]
@@ -298,12 +418,12 @@ def prewhiten(time, flux, err, verbose = True):
         while phase <= -np.pi:
             phase += 2.0*np.pi
         found_phases.append(phase)
-        
+
         #Calculate the errors
         err_fs.append(np.sqrt(6.0/len(time)) * rayleigh * np.std(flux) / (np.pi * popt[1]))
         err_amps.append(np.sqrt(2.0/len(time)) * np.std(flux))      
         err_phases.append(np.sqrt(2.0/len(time)) * np.std(flux) / popt[1])
-        
+
         #Calculate BIC 
         log_like_ish = np.sum(np.power(((original_flux - np.sum([parametrized_sin(time, f, amp, 
                                         phase) for f, amp, phase in zip(found_fs, found_amps, 
@@ -317,35 +437,38 @@ def prewhiten(time, flux, err, verbose = True):
             print(j)
     if verbose:
         print('Found {} frequencies'.format(len(found_fs)-1))
+    #if we didn't find any GOOD frequencies, get rid of that ish
+    if len(found_fs)-1 == 0:
+        return np.array([]), np.array([]), np.array([]), np.array([]), np.array([])
     #pop the last from each array, as it made the fit worse, then turn into numpy arrays
     found_fs = np.array(found_fs[:-1])
     found_amps = np.array(found_amps[:-1])
     found_phases = np.array(found_phases[:-1])
+    found_snrs = np.array(found_snrs[:-1])
+    found_peaks = np.array(found_peaks[:-1])
     err_fs = np.array(err_fs[:-1])
     err_amps = np.array(err_amps[:-1])
     err_phases = np.array(err_phases[:-1])
-    
-    #now add back the last sin function to arrive at "just the noise", and calculate SNR
-    flux += parametrized_sin(time, *popt)
-    found_snrs = found_amps/np.std(flux)
-    
+
     #Now loop through frequencies. If any of the less-strong peaks are within 1.5/T,
     #get rid of it.
     good_fs = np.array([[found_fs[0],err_fs[0]]])
     good_amps = np.array([[found_amps[0],err_amps[0]]])
     good_phases = np.array([[found_phases[0],err_phases[0]]])
     good_snrs = np.array([found_snrs[0]])
-    
-    for f,ef,a,ea,p,ep,s in zip(found_fs[1:],err_fs[1:],found_amps[1:],err_amps[1:],found_phases[1:],err_phases[1:],found_snrs[1:]):
+    good_peaks = np.array([found_peaks[0]])
+
+    for f,ef,a,ea,p,ep,s,pk in zip(found_fs[1:],err_fs[1:],found_amps[1:],err_amps[1:],found_phases[1:],err_phases[1:],found_snrs[1:],found_peaks[1:]):
         if ~np.any(np.abs(good_fs[:,0] - f) <= 1.5*rayleigh):
             good_fs = np.append(good_fs,[[f,ef]],axis=0)
             good_amps = np.append(good_amps,[[a,ea]],axis=0)
             good_phases = np.append(good_phases,[[p,ep]],axis=0)
             good_snrs = np.append(good_snrs,[s],axis=0)
+            good_peaks = np.append(good_peaks, [pk],axis=0)
     if verbose:
         print('{} unique frequencies'.format(len(good_fs)))
-    
-    return good_fs, good_amps, good_phases #, good_snrs
+        
+    return good_fs, good_amps, good_phases, good_snrs, good_peaks
 
 def harmonic_search(fs, max_n = 10):
     """
@@ -763,9 +886,12 @@ def WWZ(func_list,f1,y,t,omega,tau,c=0.0125,exclude=True):
     
     return ((Neff - 3.0) * Vy)/(2.0 * (Vx - Vy)),np.sqrt(np.power(y_a_rows[1],2.0)+np.power(y_a_rows[2],2.0))
 
+def arg_wrapper(args):
+    return WWZ(*args)
+
 
 def MP_WWZ(func_list,f1,y,t,omegas,taus,
-           c=0.0125,exclude=True,mp=True,n_processes=4):
+           c=0.0125,exclude=True,mp=True,n_processes=None):
     """
     Calculate the Weighted Wavelet Transform of the data `y`, measured at times `t`,
     evaluated on a grid of wavelet scales `omegas` and shifts `taus`, for a decay factor of 
@@ -797,7 +923,8 @@ def MP_WWZ(func_list,f1,y,t,omegas,taus,
         If `mp` is True, uses the `multiprocessing.Pool` object to calculate the WWZ
         at each point. Default True
     n_processes : int
-        If `mp` is True, sets the `processes` parameter of `multiprocessing.Pool`
+        If `mp` is True, sets the `processes` parameter of `multiprocessing.Pool`. If not given,
+        sets to `multiprocessing.cpu_count()-1`
         
     Returns
     -------
@@ -809,21 +936,51 @@ def MP_WWZ(func_list,f1,y,t,omegas,taus,
         `(len(omegas),len(taus))`
     
     """
-    
+    if not n_processes:
+        n_processes = multiprocessing.cpu_count() - 1
+        
+    if isnotebook():
+        this_tqdm = nb_tqdm
+    else:
+        this_tqdm = tqdm
+        
     if mp:
         args = np.array([[func_list,f1,y,t,omega,tau,c,exclude] for omega in omegas for tau in taus])
+        
+        """with multiprocessing.Pool(n_processes) as p:
+            transform = list(
+                        this_tqdm(
+                        p.imap(arg_wrapper, *args), total=len(omegas)*len(taus)
+                                  )
+            )                     
+        transform = np.array(transform).reshape(len(omegas),len(taus),2)"""
+       
         with multiprocessing.Pool(processes=n_processes) as pool:
-            results = pool.starmap(WWZ, args)
+            results = pool.starmap(WWZ, args, chunksize=int(len(omegas)*len(taus)/10))
             transform = np.array(results).reshape(len(omegas),len(taus),2)
             wwz = transform[:,:,0]
             wwa = transform[:,:,1]
+            
         
     else:
-        transform = np.array([[WWZ(func_list,f1,y,t,omega,tau,c,exclude) for tau in taus] for omega in omegas])
+        transform = np.array([[WWZ(func_list,f1,y,t,omega,tau,c,exclude) for tau in taus] for omega in this_tqdm(omegas)])
         wwz = transform[:,:,0].T
         wwa = transform[:,:,1].T
     
     return wwz,wwa
+
+def isnotebook():
+    try:
+        shell = get_ipython().__class__.__name__
+        if shell == 'ZMQInteractiveShell':
+            return True   # Jupyter notebook or qtconsole
+        elif shell == 'TerminalInteractiveShell':
+            return False  # Terminal running IPython
+        else:
+            return False  # Other type (?)
+    except NameError:
+        return False      # Probably standard Python interpreter
+
 
 
 def make_WWZ_plot(wwz,wwa,omegas,taus,t,y,lombscargle=True,**kwargs):
@@ -860,7 +1017,7 @@ def make_WWZ_plot(wwz,wwa,omegas,taus,t,y,lombscargle=True,**kwargs):
     """
     if lombscargle:
         ls = LombScargle(t,y)
-        freq,power = ls.autopower()
+        freq,power = ls.autopower(minimum_frequency=np.min(omegas)/2/np.pi,maximum_frequency=np.max(omegas)/2/np.pi)
     
     fig = plt.figure(constrained_layout=True,**kwargs)
 
@@ -871,34 +1028,41 @@ def make_WWZ_plot(wwz,wwa,omegas,taus,t,y,lombscargle=True,**kwargs):
     zsumax = fig.add_subplot(gs[1:3,3])
     asumax = fig.add_subplot(gs[3:,3])
 
-    lcax.scatter(time,flux,s=1,c='k')
-    lcax.set(ylabel='Normalized Flux',xlim=(np.min(time),np.max(time)))
+    lcax.scatter(t,y,s=1,c='k')
+    lcax.set(ylabel='Normalized Flux',xlim=(np.min(t),np.max(t)))
 
     wwzax.contourf(taus,omegas/2.0/np.pi,wwz,levels=100,cmap='cividis')
     wwzax.fill_between(2*np.pi/omegas+np.min(t),0,omegas/2/np.pi,alpha=0.5,facecolor='white')
+    #fill the whole axis below this
+    wwzax.fill_between([np.min(t),np.min(2*np.pi/omegas+np.min(t))],0,wwzax.get_ylim()[-1],alpha=0.5,facecolor='white')
     wwzax.fill_between(np.max(t)-2*np.pi/omegas,0,omegas/2/np.pi,alpha=0.5,facecolor='white')
-    wwzax.set(ylabel=r'Frequency [d$^{-1}$]',ylim=(np.min(omegas)/2/np.pi,np.max(omegas/2/np.pi)))
+    #fill the whole axis above this
+    wwzax.fill_between([np.max(np.max(t)-2*np.pi/omegas),np.max(t)],0,wwzax.get_ylim()[-1],alpha=0.5,facecolor='white')
+    wwzax.set(ylabel=r'Frequency [d$^{-1}$]',ylim=(np.min(omegas)/2/np.pi,np.max(omegas/2/np.pi)),
+             xlim=(np.min(t),np.max(t)))
 
     wwaax.contourf(taus,omegas/2.0/np.pi,wwa,levels=100,cmap='cividis')
     wwaax.fill_between(2*np.pi/omegas+np.min(t),0,omegas/2/np.pi,alpha=0.5,facecolor='white')
+    wwaax.fill_between([np.min(t),np.min(2*np.pi/omegas+np.min(t))],0,wwzax.get_ylim()[-1],alpha=0.5,facecolor='white')
     wwaax.fill_between(np.max(t)-2*np.pi/omegas,0,omegas/2/np.pi,alpha=0.5,facecolor='white')
+    wwaax.fill_between([np.max(np.max(t)-2*np.pi/omegas),np.max(t)],0,wwzax.get_ylim()[-1],alpha=0.5,facecolor='white')
     wwaax.set(xlabel='Time [d]',ylabel=r'Frequency [d$^{-1}$]',
-              ylim=(np.min(omegas)/2/np.pi,np.max(omegas/2/np.pi)))
+              ylim=(np.min(omegas)/2/np.pi,np.max(omegas/2/np.pi)),xlim=(np.min(t),np.max(t)))
 
     zsumax.plot(np.mean(wwz,axis=1),omegas/2.0/np.pi)
     if lombscargle:
         scale = np.max(np.mean(wwz,axis=1))/np.max(power)
         zsumax.plot(power*scale,freq,c='k')
     zsumax.set(yticks=[],xlabel=r'$\langle WWZ \rangle$',
-               ylim=(np.min(omegas)/2/np.pi,np.max(omegas/2/np.pi)))
+               ylim=(np.min(omegas)/2/np.pi,np.max(omegas/2/np.pi)),xlim=(0,zsumax.get_xlim()[-1]))
 
     asumax.plot(np.mean(wwa,axis=1),omegas/2.0/np.pi)
     asumax.set(yticks=[],xlabel=r'$\langle WWA \rangle$',
-               ylim=(np.min(omegas)/2/np.pi,np.max(omegas/2/np.pi)))
+               ylim=(np.min(omegas)/2/np.pi,np.max(omegas/2/np.pi)),xlim=(0,asumax.get_xlim()[-1]))
     if lombscargle:
         scale = np.max(np.mean(wwa,axis=1))/np.max(power)
         asumax.plot(power*scale,freq,c='k')
     
-    return fig, [lxax,wwzax,wwaax,zsumax,asumax]
+    return fig, [lcax,wwzax,wwaax,zsumax,asumax]
     
     
