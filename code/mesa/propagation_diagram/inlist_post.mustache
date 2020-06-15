@@ -33,30 +33,37 @@
     Dutch_scaling_factor = 0.8 
     
   ! super-eddington wind
-    super_eddington_scaling_factor = 3
-    super_eddington_wind_Ledd_factor = 5
+    super_eddington_scaling_factor = 3.0
+    super_eddington_wind_Ledd_factor = 5.0
 
   ! Hot winds
     hot_wind_scheme = 'Vink'
     
   ! Calculate asteroseismology
     calculate_Brunt_N2 = .true.
-   
-  ! older version of resolutions for when models broke, save just in case
-  ! Slightly finer mesh; 22,24,27,30 M_sun only
-    !mesh_delta_coeff = 0.75
-    !mesh_delta_coeff_for_highT = 2.0
     
-       
-  ! resolution
-    mesh_delta_coeff = 1.0
+  ! output
+    terminal_interval = 1
+    profile_interval = 10
+    priority_profile_interval = 50
+    max_num_profile_models = 500
+    max_model_number = 5000
+   
+  ! Max number of zones
     max_allowed_nz = 50000
+    
+  ! temporal resolution
 
-  ! use this through about the onset of core si burn
-    dX_nuc_drop_limit = 1d-3   
-    dX_nuc_drop_limit_at_high_T = 1d-4  
-    dX_nuc_drop_min_X_limit = 1d-3  
-    dX_nuc_drop_max_A_limit = 52 
+    varcontrol_target = 5.0d-3 
+    
+! time step resolution on temperature and density changes
+    delta_lgT_cntr_limit   = 0.001   ! default 0.01
+    delta_lgT_limit = 0.05d0         ! default 0.5
+
+    delta_lgRho_cntr_limit = 0.005   ! default 0.05
+    delta_lgRho_limit = 0.1          ! default 1.0
+    
+    delta_HR_limit = 2.5d-3          !
     
   ! mlt
     mixing_length_alpha = 1.5
@@ -67,7 +74,7 @@
     gradT_excess_f1 = 1d-4
     gradT_excess_f2 = 1d-2
     gradT_excess_age_fraction = 0.9d0
-
+    
     gradT_excess_lambda1 = 1.0
     gradT_excess_beta1 = 0.35
 
@@ -82,57 +89,90 @@
     include_composition_in_eps_grav = .true.
     
   ! overshoot
-    overshoot_f =  0.004
-    overshoot_f0 = 0.001
-
-    overshoot_D_min = 1d2
+    overshoot_scheme(1) = 'exponential'
+    overshoot_zone_type(1) = 'nonburn'
+    overshoot_zone_loc(1) = 'core'
+    overshoot_bdy_loc(1) = 'top'
+    overshoot_f(1) = 0.004
+    overshoot_f0(1) = 0.001
     
-   
-  ! semiconvection
-    use_Ledoux_criterion = .true.
-    alpha_semiconvection = 0.01
+    overshoot_scheme(2) = 'exponential'
+    overshoot_zone_type(2) = 'nonburn'
+    overshoot_zone_loc(2) = 'shell'
+    overshoot_bdy_loc(2) = 'top'
+    overshoot_f(2) = 0.004
+    overshoot_f0(2) = 0.001
     
-  ! thermohaline
-    thermohaline_coeff = 2.0 
-    thermohaline_option = 'Kippenhahn'
+    overshoot_scheme(3) = 'exponential'
+    overshoot_zone_type(3) = 'nonburn'
+    overshoot_zone_loc(3) = 'shell'
+    overshoot_bdy_loc(3) = 'bottom'
+    overshoot_f(3) = 0.004
+    overshoot_f0(3) = 0.001
     
-  ! angular momentum transport
-    am_nu_visc_factor = 1  
-    am_D_mix_factor = 0.0333333333333
-    D_DSI_factor = 0.0d0
-    D_SH_factor  = 0.0d0
-    D_SSI_factor = 0.0d0
-    D_ES_factor  = 0.0d0
-    D_GSF_factor = 0.0d0
-    D_ST_factor  = 0.0d0
+    overshoot_scheme(4) = 'exponential'
+    overshoot_zone_type(4) = 'burn_H'
+    overshoot_zone_loc(4) = 'core'
+    overshoot_bdy_loc(4) = 'top'
+    overshoot_f(4) = 0.004
+    overshoot_f0(4) = 0.001
     
-  ! temporal resolution
+    overshoot_scheme(5) = 'exponential'
+    overshoot_zone_type(5) = 'burn_H'
+    overshoot_zone_loc(5) = 'shell'
+    overshoot_bdy_loc(5) = 'top'
+    overshoot_f(5) = 0.004
+    overshoot_f0(5) = 0.001
+    
+    overshoot_scheme(6) = 'exponential'
+    overshoot_zone_type(6) = 'burn_H'
+    overshoot_zone_loc(6) = 'shell'
+    overshoot_bdy_loc(6) = 'bottom'
+    overshoot_f(6) = 0.004
+    overshoot_f0(6) = 0.001
+    
+    overshoot_scheme(7) = 'exponential'
+    overshoot_zone_type(7) = 'burn_He'
+    overshoot_zone_loc(7) = 'core'
+    overshoot_bdy_loc(7) = 'top'
+    overshoot_f(7) = 0.004
+    overshoot_f0(7) = 0.001
+    
+    overshoot_sche!me(8) = 'exponential'
+    overshoot_zone_type(8) = 'burn_He'
+    overshoot_zone_loc(8) = 'shell'
+    overshoot_bdy_loc(8) = 'top'
+    overshoot_f(8) = 0.004
+    overshoot_f0(8) = 0.001
+    
+    overshoot_scheme(9) = 'exponential'
+    overshoot_zone_type(9) = 'burn_He'
+    overshoot_zone_loc(9) = 'shell'
+    overshoot_bdy_loc(9) = 'bottom'
+    overshoot_f(9) = 0.004
+    overshoot_f0(9) = 0.001
+    
+    overshoot_scheme(10) = 'exponential'
+    overshoot_zone_type(10) = 'burn_Z'
+    overshoot_zone_loc(10) = 'core'
+    overshoot_bdy_loc(10) = 'top'
+    overshoot_f(10) = 0.004
+    overshoot_f0(10) = 0.001
+    
+    overshoot_scheme(11) = 'exponential'
+    overshoot_zone_type(11) = 'burn_Z'
+    overshoot_zone_loc(11) = 'shell'
+    overshoot_bdy_loc(11) = 'top'
+    overshoot_f(11) = 0.004
+    overshoot_f0(11) = 0.001
+    
+    overshoot_scheme(12) = 'exponential'
+    overshoot_zone_type(12) = 'burn_Z'
+    overshoot_zone_loc(12) = 'shell'
+    overshoot_bdy_loc(12) = 'bottom'
+    overshoot_f(12) = 0.004
+    overshoot_f0(12) = 0.001
 
-    varcontrol_target = 5d-5
-    min_timestep_limit = 1d-12 ! (seconds)
-    max_timestep_factor = 1.20d0
-
-  ! resolve the depletion of each fuel
-    delta_lg_XH_cntr_limit = 0.01d0
-    delta_lg_XH_cntr_max   = 0.0d0
-    delta_lg_XH_cntr_min   = -6.0d0
-    delta_lg_XH_cntr_hard_limit = 0.02d0
-
-    delta_lg_XHe_cntr_limit = 0.01d0
-    delta_lg_XHe_cntr_max   = 0.0d0
-    delta_lg_XHe_cntr_min   = -6.0d0
-    delta_lg_XHe_cntr_hard_limit = 0.02d0
-
-    delta_lg_XC_cntr_limit = 0.01d0
-    delta_lg_XC_cntr_max   = 0.0d0
-    delta_lg_XC_cntr_min   = -6.0d0
-    delta_lg_XC_cntr_hard_limit = 0.02d0
-
-  ! this is mainly to resolve properly when the star goes off the main sequence
-    delta_HR_limit = 0.0025d0
-    delta_lgL_He_limit =0.1
-
-  ! limit changes iin the mass due to winds
-    delta_lg_star_mass_limit = 4e-5
+    overshoot_D_min = 1.0d2
 
 / ! end of controls namelist

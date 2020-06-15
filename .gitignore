@@ -1,4 +1,5 @@
 paper*
+*paper*
 *.tex
 data
 code/mesa/tutorial
