@@ -190,6 +190,21 @@ def parametrized_sin(t, freq, amp, phase):
     "A sin function, used for prewhitening"
     return amp * np.sin(2.0*np.pi*freq*t + phase)
 
+def multiple_sins(t, *args):
+    n_sins = int(len(args)/3)
+    fs = args[:n_sins]
+    amps = args[n_sins:2*n_sins]
+    phis = args[2*n_sins:]
+    return np.sum([parametrized_sin(t,f,a,p) for f,a,p in zip(fs,amps,phis)],axis=0)
+
+def harmonic_sin(t, *args):
+    f_0 = args[0]
+    amps_phis = args[1:]
+    n_sins = int(len(amps_phis)/2)
+    amps = amps_phis[:n_sins]
+    phis = amps_phis[n_sins:]
+    return np.sum([parametrized_sin(t,f_0*(i+1),a,p) for i,(a,p) in enumerate(zip(amps,phis))],axis=0)
+
 
 def noise_func(f, alpha_0, tau, gamma, alpha_w):
     """
@@ -244,6 +259,8 @@ def fit_red_noise(f, p):
     -------
     popt : array-like
         Optimal parameters for the curve-fit
+    pcov : array-like
+        Covariance matrix of optimal parameters
     resid : array-like
         The residual power after dividing out the red noise. This is kinda like a signal to noise I guess?
     
@@ -258,7 +275,7 @@ def fit_red_noise(f, p):
     good_y = amplitude[good_a & good_f]
         
     p0 = [np.max(good_y), 0.1, 2.0, 1e-6]
-    bounds = bounds = ([0,0,-np.inf,1e-7],[np.inf,np.inf,np.inf,np.inf])
+    bounds = ([0,0,0.0,1e-7wa],[np.inf,np.inf,np.inf,np.inf])
         
     popt, pcov = curve_fit(log_noise, good_x, np.log10(good_y), bounds=bounds, p0=p0)
     
@@ -268,7 +285,7 @@ def fit_red_noise(f, p):
     
     return popt, pcov, resid
 
-def prewhiten(time, flux, err, verbose = True, red_noise=True, max_freq = np.inf):
+def prewhiten(time, flux, err, verbose = True, red_noise=True, max_freq = np.inf, final_fit=False):
     """
     Runs through a prewhitening procedure to reproduce the variability as sin functions. Now encorporates an optional
     way of fitting for red noise in the periodograms!
@@ -287,6 +304,8 @@ def prewhiten(time, flux, err, verbose = True, red_noise=True, max_freq = np.inf
         If set, will fit for a red noise background model before finding the highest peak
     max_freq : numeric
         Determines the number of frequencies to fit for if given. Default `np.inf`
+    final_fit : bool
+        If set, will perform one final fit on all recovered frequencies simultaneously, and adjust the errors accordingly.
         
     Returns
     -------
@@ -298,7 +317,7 @@ def prewhiten(time, flux, err, verbose = True, red_noise=True, max_freq = np.inf
         Nx2 array with first dimension amplitudes, and the second errors
     good_snrs :`~numpy.ndarray`
         1D array with signal to noise, calculated directly from the periodogram
-    good_amps :`~numpy.ndarray`
+    good_peaks :`~numpy.ndarray`
         1D array with the heights of the extracted peaks.
     
     """
@@ -432,6 +451,258 @@ def prewhiten(time, flux, err, verbose = True, red_noise=True, max_freq = np.inf
         bic_dif = bic - old_bic
         #subtract off the fit
         flux -= parametrized_sin(time, *popt)
+        j+=1
+        if (j % 10 == 0) and verbose:
+            print(j)
+    if verbose:
+        print('Found {} frequencies'.format(len(found_fs)-1))
+    #if we didn't find any GOOD frequencies, get rid of that ish
+    if len(found_fs)-1 == 0:
+        return np.array([]), np.array([]), np.array([]), np.array([]), np.array([])
+    #pop the last from each array, as it made the fit worse, then turn into numpy arrays
+    found_fs = np.array(found_fs[:-1])
+    found_amps = np.array(found_amps[:-1])
+    found_phases = np.array(found_phases[:-1])
+    found_snrs = np.array(found_snrs[:-1])
+    found_peaks = np.array(found_peaks[:-1])
+    err_fs = np.array(err_fs[:-1])
+    err_amps = np.array(err_amps[:-1])
+    err_phases = np.array(err_phases[:-1])
+
+    #Now loop through frequencies. If any of the less-strong peaks are within 1.5/T,
+    #get rid of it.
+    good_fs = np.array([[found_fs[0],err_fs[0]]])
+    good_amps = np.array([[found_amps[0],err_amps[0]]])
+    good_phases = np.array([[found_phases[0],err_phases[0]]])
+    good_snrs = np.array([found_snrs[0]])
+    good_peaks = np.array([found_peaks[0]])
+
+    for f,ef,a,ea,p,ep,s,pk in zip(found_fs[1:],err_fs[1:],found_amps[1:],err_amps[1:],found_phases[1:],err_phases[1:],found_snrs[1:],found_peaks[1:]):
+        if ~np.any(np.abs(good_fs[:,0] - f) <= 1.5*rayleigh):
+            good_fs = np.append(good_fs,[[f,ef]],axis=0)
+            good_amps = np.append(good_amps,[[a,ea]],axis=0)
+            good_phases = np.append(good_phases,[[p,ep]],axis=0)
+            good_snrs = np.append(good_snrs,[s],axis=0)
+            good_peaks = np.append(good_peaks, [pk],axis=0)
+    if verbose:
+        print('{} unique frequencies'.format(len(good_fs)))
+        
+    if final_fit: #refit all parameters
+        
+        fs = good_fs[:,0]
+        amps = good_amps[:,0]
+        phis = good_phases[:,0]
+
+        amp_errs = good_amps[:,1]
+        phi_errs = good_phases[:,1]
+
+        p0 = np.concatenate((fs, amps, phis))
+        
+        f_bounds = ([f-rayleigh for f in fs],[f+rayleigh for f in fs])
+        amp_bounds = ([a-ae for a,ae in zip(amps,amp_errs)],[a+ae for a,ae in zip(amps,amp_errs)])
+        phi_bounds = ([p-pe for p,pe in zip(phis,phi_errs)],[p+pe for p,pe in zip(phis,phi_errs)])
+
+        lbounds = np.concatenate([b[0] for b in [f_bounds,amp_bounds,phi_bounds]])
+        ubounds = np.concatenate([b[1] for b in [f_bounds,amp_bounds,phi_bounds]])
+        bounds = (lbounds,ubounds)
+        
+        popt, pcov = curve_fit(multiple_sins, original_time, original_flux, bounds=bounds, p0=p0)
+        
+        amp_ratio = popt[len(good_amps):2*len(good_amps)]/good_amps[:,0]
+        good_fs[:,0] = popt[:len(good_fs)]
+        good_fs[:,1] *= amp_ratio
+        good_amps[:,0] = popt[len(good_fs):2*len(good_fs)]
+        good_phases[:,0] = popt[2*len(good_fs):]
+        good_phases[:,1] *= amp_ratio
+
+        
+    return good_fs, good_amps, good_phases, good_snrs, good_peaks
+
+def prewhiten_harmonic(time, flux, err, verbose = True, red_noise=True, max_freq = np.inf, n_harm=3):
+    """
+    Runs through a prewhitening procedure to reproduce the variability as sin functions. Now encorporates an optional
+    way of fitting for red noise in the periodograms, and the ability to fit harmonics simultaneously.
+    
+    Parameters
+    ----------
+    time : array-like
+        times
+    flux : array-like
+        fluxes
+    err : array-like
+        corresponding errors.
+    verbose : bool
+        If set, will print out every 10th stage of prewhitening, as well as some other diagnostics
+    red_noise : bool
+        If set, will fit for a red noise background model before finding the highest peak
+    max_freq : numeric
+        Determines the number of frequencies to fit for if given. Default `np.inf`
+        
+    Returns
+    -------
+    good_fs : `~numpy.ndarray`
+        Nx2 array with first dimension frequencies, and the second errors
+    good_amps :`~numpy.ndarray`
+        Nx2 array with first dimension amplitudes, and the second errors
+    good_amps :`~numpy.ndarray`
+        Nx2 array with first dimension amplitudes, and the second errors
+    good_snrs :`~numpy.ndarray`
+        1D array with signal to noise, calculated directly from the periodogram
+    good_peaks :`~numpy.ndarray`
+        1D array with the heights of the extracted peaks.
+    
+    """
+    
+    pseudo_NF = 0.5 / (np.mean(np.diff(time)))
+    rayleigh = 1.0 / (np.max(time)-np.min(time))
+
+    #Step 1: subtract off the mean, save original arrays for later
+    flux -= np.mean(flux)
+    time -= np.mean(time)
+
+    original_flux = flux.copy()
+    original_err = err.copy()
+    original_time = time.copy()
+
+    found_fs = []
+    err_fs = []
+    found_amps = []
+    err_amps = []
+    found_phases = []
+    err_phases = []
+    found_peaks = []
+    found_snrs = []
+
+    #Step 2: Calculate the Lomb Scargle periodogram
+    ls = LombScargle(time, flux, normalization='psd')
+    frequency, power = ls.autopower(minimum_frequency=1.0/30.0,
+                    maximum_frequency=pseudo_NF)
+    power /= len(time) #putting into the right units
+
+    #Step 2.5: Normaling by the red noise!
+    if red_noise:
+        try:
+            popt, pcov, resid = fit_red_noise(frequency, power)
+        except RuntimeError:
+            popt, pcov, resid = fit_red_noise(frequency[frequency < 50], power[frequency < 50])
+
+        power = resid
+
+    #Step 3: Find frequency of max residual power, and the SNR of that peak
+    f_0 = frequency[np.argmax(power)]
+    noise_region = (np.abs(frequency - f_0)/rayleigh < 7) & (np.abs(frequency - f_0)/rayleigh > 2)
+    found_peaks.append(power.max())
+    found_snrs.append(power.max()/np.std(power[noise_region]))
+
+    #Step 4: Fit the sin. Initial guess is that frequency, the max flux point, and no phase
+    # Then save the fit params
+    A_0 = [np.max(flux)/(2**i) for i in range(n_harm)]
+    phi_0 = [0 for i in range(n_harm)]
+    p0 = np.concatenate([[f_0], A_0, phi_0])
+        
+    f_bounds = ([f_0-rayleigh],[f_0+rayleigh])
+    amp_bounds = ([0 for i in range(n_harm)],[np.inf for i in range(n_harm)])
+    phi_bounds = ([-np.inf for i in range(n_harm)],[np.inf for i in range(n_harm)])
+
+    lbounds = np.concatenate([b[0] for b in [f_bounds,amp_bounds,phi_bounds]])
+    ubounds = np.concatenate([b[1] for b in [f_bounds,amp_bounds,phi_bounds]])
+    bounds = (lbounds,ubounds)
+
+    popt, pcov = curve_fit(harmonic_sin, time, flux, bounds=bounds, p0=p0)
+
+    found_fs.append(popt[0])
+    found_amps.append(popt[1])
+    phase = popt[1+n_harm]
+    while phase >= np.pi:
+        phase -= 2.0*np.pi
+    while phase <= -np.pi:
+        phase += 2.0*np.pi
+    found_phases.append(phase)
+
+    #Calculate the errors
+    err_fs.append(np.sqrt(6.0/len(time)) * rayleigh * np.std(flux) / (np.pi * popt[1]))
+    err_amps.append(np.sqrt(2.0/len(time)) * np.std(flux))
+    err_phases.append(np.sqrt(2.0/len(time)) * np.std(flux) / popt[1])
+
+    #Calculate the BIC up to a constant: -2 log L + m log (N)
+    model = harmonic_sin(time, *popt)
+    n_pars = len(popt)
+    log_like_ish = np.sum(np.power(((original_flux - model) / original_err),2.0))
+
+    bic = log_like_ish + n_pars*np.log(len(time))
+    #bic with no fit is:
+    old_bic = np.sum(np.power((original_flux/ original_err),2.0))
+    bic_dif = bic - old_bic
+
+    #subtract off the fit
+    flux -= harmonic_sin(time, *popt)
+
+    #now loop until BIC hits a minimum
+    j = 0
+    while (bic_dif <= 0) and (len(found_fs) <= max_freq):
+        #Reset old_bic
+        old_bic = bic
+        #Lomb Scargle
+        ls = LombScargle(time, flux, normalization='psd')
+        frequency, power = ls.autopower(minimum_frequency=1.0/30.0,
+                        maximum_frequency=pseudo_NF)
+
+        power /= len(time) #putting into the right units
+
+        #fit
+        if red_noise:
+            try:
+                popt, pcov, resid = fit_red_noise(frequency, power)
+            except RuntimeError:
+                popt, pcov, resid = fit_red_noise(frequency[frequency < 50], power[frequency < 50])
+
+            power = resid
+
+        #Highest peak
+        f_0 = frequency[np.argmax(power)]
+        noise_region = (np.abs(frequency - f_0)/rayleigh < 7) & (np.abs(frequency - f_0)/rayleigh > 2)
+        found_peaks.append(power.max())
+        found_snrs.append(power.max()/np.std(power[noise_region]))
+
+        #Fit
+        A_0 = [np.max(flux)/(2**i) for i in range(n_harm)]
+        phi_0 = [0 for i in range(n_harm)]
+        p0 = np.concatenate([[f_0], A_0, phi_0])
+        
+        f_bounds = ([f_0-rayleigh],[f_0+rayleigh])
+        amp_bounds = ([0 for i in range(n_harm)],[np.inf for i in range(n_harm)])
+        phi_bounds = ([-np.inf for i in range(n_harm)],[np.inf for i in range(n_harm)])
+
+        lbounds = np.concatenate([b[0] for b in [f_bounds,amp_bounds,phi_bounds]])
+        ubounds = np.concatenate([b[1] for b in [f_bounds,amp_bounds,phi_bounds]])
+        bounds = (lbounds,ubounds)
+
+        popt, pcov = curve_fit(harmonic_sin, time, flux, bounds=bounds, p0=p0)
+        
+        found_fs.append(popt[0])
+        found_amps.append(popt[1])
+        phase = popt[1+n_harm]
+        while phase >= np.pi:
+            phase -= 2.0*np.pi
+        while phase <= -np.pi:
+            phase += 2.0*np.pi
+        found_phases.append(phase)
+
+        #Calculate the errors
+        err_fs.append(np.sqrt(6.0/len(time)) * rayleigh * np.std(flux) / (np.pi * popt[1]))
+        err_amps.append(np.sqrt(2.0/len(time)) * np.std(flux))      
+        err_phases.append(np.sqrt(2.0/len(time)) * np.std(flux) / popt[1])
+
+        #Calculate BIC 
+        model += harmonic_sin(time, *popt)
+        n_pars += len(popt)
+        log_like_ish = np.sum(np.power(((original_flux - model) / original_err),2.0))
+
+        bic = log_like_ish + n_pars*np.log(len(time))
+        bic_dif = bic - old_bic
+
+        #subtract off the fit
+        flux -= harmonic_sin(time, *popt)
         j+=1
         if (j % 10 == 0) and verbose:
             print(j)
