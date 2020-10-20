@@ -275,7 +275,7 @@ def fit_red_noise(f, p):
     good_y = amplitude[good_a & good_f]
         
     p0 = [np.max(good_y), 0.1, 2.0, 1e-6]
-    bounds = ([0,0,0.0,1e-7wa],[np.inf,np.inf,np.inf,np.inf])
+    bounds = ([0,0,0.0,1e-7],[np.inf,np.inf,np.inf,np.inf])
         
     popt, pcov = curve_fit(log_noise, good_x, np.log10(good_y), bounds=bounds, p0=p0)
     
