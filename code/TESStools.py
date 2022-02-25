@@ -13,8 +13,10 @@ from scipy.optimize import minimize
 from scipy.optimize import curve_fit
 import emcee
 import multiprocessing
+from multiprocessing import Pool, cpu_count
 from tqdm import tqdm
 from tqdm.notebook import tqdm as nb_tqdm
+import os
 
 data_dir = '../data/all_massive_lcs/'
 
@@ -22,7 +24,7 @@ def set_data_dir(datadir):
     global data_dir
     data_dir = datadir
 
-def get_lc_from_id(ticid, normalize=True, clean=True):
+def get_lc_from_id(ticid, normalize=True, clean=True, data_dir=data_dir):
     
     """
     Step 1: load in the light curve from the TIC number
@@ -102,7 +104,7 @@ def lc_extract(lc, normalize=True, smooth=None):
     flux = rflux[~np.isnan(rflux)]
     err = rerr[~np.isnan(rflux)]
 
-    lc_df = pd.DataFrame(data={'Time':time,'Flux':flux,'Err':err}).sort_values('Time')
+    lc_df = pd.DataFrame(data={'Time':time,'Flux':flux,'Err':err}, index=[pd.Timestamp(t, unit='d') for t in time]).sort_values('Time')
     
     if smooth is not None:
         lc_df_smooth = lc_df.rolling(smooth, center=True).median()
@@ -285,7 +287,8 @@ def fit_red_noise(f, p):
     
     return popt, pcov, resid
 
-def prewhiten(time, flux, err, verbose = True, red_noise=True, max_freq = np.inf, final_fit=False):
+
+def prewhiten(time, flux, err, verbose = True, red_noise=True, max_freq=None, max_nfreq = np.inf, final_fit=False):
     """
     Runs through a prewhitening procedure to reproduce the variability as sin functions. Now encorporates an optional
     way of fitting for red noise in the periodograms!
@@ -302,7 +305,9 @@ def prewhiten(time, flux, err, verbose = True, red_noise=True, max_freq = np.inf
         If set, will print out every 10th stage of prewhitening, as well as some other diagnostics
     red_noise : bool
         If set, will fit for a red noise background model before finding the highest peak
-    max_freq : numeric
+    max_freq : float, default None
+        If not None, will only search for frequencies up to `max_freq`
+    max_nfreq : numeric
         Determines the number of frequencies to fit for if given. Default `np.inf`
     final_fit : bool
         If set, will perform one final fit on all recovered frequencies simultaneously, and adjust the errors accordingly.
@@ -313,7 +318,7 @@ def prewhiten(time, flux, err, verbose = True, red_noise=True, max_freq = np.inf
         Nx2 array with first dimension frequencies, and the second errors
     good_amps :`~numpy.ndarray`
         Nx2 array with first dimension amplitudes, and the second errors
-    good_amps :`~numpy.ndarray`
+    good_phases :`~numpy.ndarray`
         Nx2 array with first dimension amplitudes, and the second errors
     good_snrs :`~numpy.ndarray`
         1D array with signal to noise, calculated directly from the periodogram
@@ -359,6 +364,8 @@ def prewhiten(time, flux, err, verbose = True, red_noise=True, max_freq = np.inf
 
     #Step 3: Find frequency of max residual power, and the SNR of that peak
     f_0 = frequency[np.argmax(power)]
+    if max_freq is not None:
+        f_0 = frequency[np.argmax(power[frequency <= max_freq])]
     noise_region = (np.abs(frequency - f_0)/rayleigh < 7) & (np.abs(frequency - f_0)/rayleigh > 2)
     found_peaks.append(power.max())
     found_snrs.append(power.max()/np.std(power[noise_region]))
@@ -399,7 +406,7 @@ def prewhiten(time, flux, err, verbose = True, red_noise=True, max_freq = np.inf
 
     #now loop until BIC hits a minimum
     j = 0
-    while (bic_dif <= 0) and (len(found_fs) <= max_freq):
+    while (bic_dif <= 0) and (len(found_fs) <= max_nfreq):
         #Reset old_bic
         old_bic = bic
         #Lomb Scargle
@@ -420,6 +427,8 @@ def prewhiten(time, flux, err, verbose = True, red_noise=True, max_freq = np.inf
 
         #Highest peak
         f_0 = frequency[np.argmax(power)]
+        if max_freq is not None:
+            f_0 = frequency[np.argmax(power[frequency <= max_freq])]
         noise_region = (np.abs(frequency - f_0)/rayleigh < 7) & (np.abs(frequency - f_0)/rayleigh > 2)
         found_peaks.append(power.max())
         found_snrs.append(power.max()/np.std(power[noise_region]))
@@ -518,7 +527,7 @@ def prewhiten(time, flux, err, verbose = True, red_noise=True, max_freq = np.inf
         
     return good_fs, good_amps, good_phases, good_snrs, good_peaks
 
-def prewhiten_harmonic(time, flux, err, verbose = True, red_noise=True, max_freq = np.inf, n_harm=3):
+def prewhiten_harmonic(time, flux, err, verbose = True, red_noise=True, max_freq = None, max_nfreq = np.inf, n_harm=3):
     """
     Runs through a prewhitening procedure to reproduce the variability as sin functions. Now encorporates an optional
     way of fitting for red noise in the periodograms, and the ability to fit harmonics simultaneously.
@@ -535,7 +544,9 @@ def prewhiten_harmonic(time, flux, err, verbose = True, red_noise=True, max_freq
         If set, will print out every 10th stage of prewhitening, as well as some other diagnostics
     red_noise : bool
         If set, will fit for a red noise background model before finding the highest peak
-    max_freq : numeric
+    max_freq : float, default None
+        If not None, will only search for frequencies up to `max_freq`
+    max_nfreq : numeric
         Determines the number of frequencies to fit for if given. Default `np.inf`
         
     Returns
@@ -590,6 +601,8 @@ def prewhiten_harmonic(time, flux, err, verbose = True, red_noise=True, max_freq
 
     #Step 3: Find frequency of max residual power, and the SNR of that peak
     f_0 = frequency[np.argmax(power)]
+    if max_freq is not None:
+        f_0 = frequency[np.argmax(power[frequency <= max_freq])]
     noise_region = (np.abs(frequency - f_0)/rayleigh < 7) & (np.abs(frequency - f_0)/rayleigh > 2)
     found_peaks.append(power.max())
     found_snrs.append(power.max()/np.std(power[noise_region]))
@@ -607,8 +620,12 @@ def prewhiten_harmonic(time, flux, err, verbose = True, red_noise=True, max_freq
     lbounds = np.concatenate([b[0] for b in [f_bounds,amp_bounds,phi_bounds]])
     ubounds = np.concatenate([b[1] for b in [f_bounds,amp_bounds,phi_bounds]])
     bounds = (lbounds,ubounds)
-
-    popt, pcov = curve_fit(harmonic_sin, time, flux, bounds=bounds, p0=p0)
+    
+    try:
+        popt, pcov = curve_fit(harmonic_sin, time, flux, bounds=bounds, p0=p0)
+    except:
+        print(p0,bounds)
+        raise
 
     found_fs.append(popt[0])
     found_amps.append(popt[1])
@@ -639,7 +656,7 @@ def prewhiten_harmonic(time, flux, err, verbose = True, red_noise=True, max_freq
 
     #now loop until BIC hits a minimum
     j = 0
-    while (bic_dif <= 0) and (len(found_fs) <= max_freq):
+    while (bic_dif <= 0) and (len(found_fs) <= max_nfreq):
         #Reset old_bic
         old_bic = bic
         #Lomb Scargle
@@ -660,6 +677,8 @@ def prewhiten_harmonic(time, flux, err, verbose = True, red_noise=True, max_freq
 
         #Highest peak
         f_0 = frequency[np.argmax(power)]
+        if max_freq is not None:
+            f_0 = frequency[np.argmax(power[frequency <= max_freq])]
         noise_region = (np.abs(frequency - f_0)/rayleigh < 7) & (np.abs(frequency - f_0)/rayleigh > 2)
         found_peaks.append(power.max())
         found_snrs.append(power.max()/np.std(power[noise_region]))
@@ -676,8 +695,13 @@ def prewhiten_harmonic(time, flux, err, verbose = True, red_noise=True, max_freq
         lbounds = np.concatenate([b[0] for b in [f_bounds,amp_bounds,phi_bounds]])
         ubounds = np.concatenate([b[1] for b in [f_bounds,amp_bounds,phi_bounds]])
         bounds = (lbounds,ubounds)
-
-        popt, pcov = curve_fit(harmonic_sin, time, flux, bounds=bounds, p0=p0)
+        try:
+            popt, pcov = curve_fit(harmonic_sin, time, flux, bounds=bounds, p0=p0)
+        except RunTimeError:
+            popt, pcov = curve_fit(harmonic_sin, time, flux, bounds=bounds, p0=p0, max_nfev=1000*len(time))
+        except:
+            print(p0,bounds)
+            raise
         
         found_fs.append(popt[0])
         found_amps.append(popt[1])

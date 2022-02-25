@@ -229,7 +229,7 @@
       ! where val = net nuclear energy plus eps_grav minus all neutrino losses.
    !eps_nuc_plus_nuc_neu
 
-   !eps_nuc ! ergs/g/sec from nuclear reactions (reaction neutrinos subtracted)
+   eps_nuc ! ergs/g/sec from nuclear reactions (reaction neutrinos subtracted)
    !log_abs_eps_nuc
    !d_lnepsnuc_dlnd
    !d_epsnuc_dlnd

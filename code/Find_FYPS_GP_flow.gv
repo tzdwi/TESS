@@ -1,0 +1,42 @@
+##Command to produce the output: "neato -Teps Find_FYPS_GP_flow.gv > ../plots/Find_FYPS_GP_flow.eps"
+
+digraph Find {
+ratio="fill";
+ size="8,5!";
+ margin=0;
+graph [ resolution=150, fontsize=80 ];
+#node [shape=triangle label="Sample", color=cornflowerblue fontsize=80 style="filled"];  Sample; 
+node [shape=diamond label="Periodic" color=mediumorchid, fontsize=80, style="rounded,filled"];  Periodic; 
+node [shape=diamond label="Not Periodic" color=mediumpurple, fontsize=80, style="rounded,filled"];  NP; 
+node [shape=ellipse,label="LC\nFrequencies?" color=black, fontcolor="black", fontsize=80, style=""]; LCFreq ;
+node [shape=ellipse,label="LC Frequencies\nSignificant?" color=black, fontsize=80]; LCSig ;
+node [shape=rectangle,label="Compute GP" color=black, fontsize=80]; GP1 ;
+node [shape=rectangle,label="Prewhiten\nResiduals" color=black, fontsize=80]; PWR1 ;
+node [shape=ellipse,label="Residual Frequencies\nSignificant?" color=black, fontsize=80]; RSig1 ;
+
+
+
+LCFreq->LCSig [ label = " Yes" , fontsize=80, penwidth=7]
+LCFreq->GP1 [ label = " No" , fontsize=80, penwidth=7];
+GP1->PWR1 [fontsize=80, penwidth=7];
+
+
+
+
+LCSig->Periodic [ label = " Yes" , fontsize=80, penwidth=7];
+LCSig->GP1[ label = " No" , fontsize=80, penwidth=7];
+PWR1->RSig1 [fontsize=80, penwidth=7];
+
+#RSig1->Periodic [ label = " Yes" , fontsize=80, penwidth=7];
+RSig1->NP [ label = "No" , fontsize=80, penwidth=7];
+
+
+
+overlap=false
+label=""
+fontsize=12;
+{ rank=same; LCFreq}
+{ rank=same; LCSig1, GP1}
+{ rank=same; PWR1, RSig1}
+{ rank=same; NP, Periodic}
+}
